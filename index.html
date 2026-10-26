@@ -5,22 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="format-detection" content="telephone=no, email=no, address=no">
 <title>QR Breaker</title>
+<script>
+  // A new soft hue on every visit; lightness and chroma stay fixed in the CSS tokens.
+  document.documentElement.style.setProperty('--hue', Math.floor(Math.random() * 360));
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #ededed;
-    --fg: #8f84bd;
-    --muted: #8f84bd;
+    --hue: 290;
+    --fg: oklch(.66 .085 var(--hue));
+    --muted: var(--fg);
     --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;
     --sym: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1a1a1a;
-      --fg: #b6acdc;
-      --muted: #b6acdc;
+      --fg: oklch(.8 .07 var(--hue));
+      --muted: var(--fg);
     }
   }
   * { box-sizing: border-box; }
@@ -223,9 +228,9 @@
     }
   }
 
-  function crackSound() {
+  function crackSound(delay = 0) {
     if (!audio) return;
-    const t = audio.currentTime + .005;
+    const t = audio.currentTime + .005 + delay;
     grain(t, { freq: 2200 + Math.random() * 2600, q: 1.2 + Math.random(), gain: .55, decay: .05 + Math.random() * .05 });
     grain(t, { type: 'highpass', freq: 6000, q: .5, gain: .25, decay: .02 });
     thock(t, 140 + Math.random() * 80, .25, .06);
@@ -247,6 +252,7 @@
 
   canvas.addEventListener('pointerdown', e => {
     initAudio();
+    askMotion();
     // Once it no longer scans, the next tap brings a fresh QR back.
     if (!alive) return build();
     const rect = canvas.getBoundingClientRect();
@@ -262,13 +268,19 @@
         const d = (c + .5 - mx) ** 2 + (r + .5 - my) ** 2;
         if (d < bd) { bd = d; best = i; }
       }
-    if (best < 0) return;
-    broken[best] = 1;
-    burst(Math.floor(best / n), best % n);
+    if (best >= 0) smash([best]);
+  });
+
+  function smash(cells) {
+    cells.forEach((i, k) => {
+      broken[i] = 1;
+      burst(Math.floor(i / n), i % n);
+      // Stagger the cracks a little so a shake sounds like a rattle, not one loud hit.
+      if (k < 12) crackSound(k * .025);
+    });
     if (decode()) {
-      crackSound();
-      shake = Math.max(shake, 3);
-      vibrate(8);
+      shake = Math.max(shake, cells.length > 1 ? 10 : 3);
+      vibrate(cells.length > 1 ? 60 : 8);
     } else {
       alive = false;
       deathSound();
@@ -276,6 +288,36 @@
       flash = 1;
       vibrate([40, 40, 120]);
     }
+  }
+
+  // Shaking the phone hard breaks a handful of random cells at once.
+  const SHAKE_THRESHOLD = 22; // m/s², roughly a firm wrist flick
+  let lastShake = 0, motionAsked = false;
+
+  function askMotion() {
+    if (motionAsked) return;
+    motionAsked = true;
+    const DME = window.DeviceMotionEvent;
+    // iOS only delivers motion events after permission, which must be asked from a tap.
+    if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => {});
+  }
+
+  window.addEventListener('devicemotion', e => {
+    if (!alive) return;
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x == null) return;
+    const force = Math.abs(Math.hypot(a.x, a.y, a.z) - 9.8);
+    const now = performance.now();
+    if (force < SHAKE_THRESHOLD || now - lastShake < 350) return;
+    lastShake = now;
+    const pool = [];
+    for (let i = 0; i < n * n; i++) if (dark[i] && !broken[i]) pool.push(i);
+    const count = Math.min(pool.length, Math.round(6 + (force - SHAKE_THRESHOLD) * .8));
+    for (let k = 0; k < count; k++) {
+      const j = k + Math.floor(Math.random() * (pool.length - k));
+      [pool[k], pool[j]] = [pool[j], pool[k]];
+    }
+    smash(pool.slice(0, count));
   });
 
   let last = performance.now();
