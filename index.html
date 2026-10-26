@@ -332,8 +332,6 @@
 
   canvas.addEventListener('pointerdown', e => {
     initAudio();
-    // Once it no longer scans, the next tap brings a fresh QR back.
-    if (!alive) return build();
     canvas.setPointerCapture(e.pointerId);
     drag = toGrid(e);
     const i = hit(drag.x, drag.y, 1);
@@ -343,10 +341,10 @@
   // Dragging breaks every cell the finger passes over; fast swipes are sampled
   // every half cell so no cell in between gets skipped.
   canvas.addEventListener('pointermove', e => {
-    if (!drag || !alive) return;
+    if (!drag) return;
     const to = toGrid(e);
     const steps = Math.ceil(Math.hypot(to.x - drag.x, to.y - drag.y) / .5);
-    for (let k = 1; k <= steps && alive; k++) {
+    for (let k = 1; k <= steps; k++) {
       const i = hit(drag.x + (to.x - drag.x) * k / steps, drag.y + (to.y - drag.y) * k / steps, .75);
       if (i >= 0) smash([i]);
     }
@@ -369,18 +367,24 @@
       // Stagger the cracks a little so a shake sounds like a rattle, not one loud hit.
       if (k < 12) crackSound(k * .025);
     });
-    if (decode()) {
+    // The moment it stops scanning gets a big crumble once; after that you can keep breaking.
+    if (!alive || decode()) {
       shake = Math.max(shake, cells.length > 1 ? 10 : 3);
       vibrate(cells.length > 1 ? 60 : 8);
     } else {
       alive = false;
-      drag = null;
       deathSound();
       shake = 14;
       flash = 1;
       vibrate([40, 40, 120]);
     }
+    // When every cell is gone, a fresh QR comes back so it never runs out.
+    if (!rebuilding && !dark.some((d, i) => d && !broken[i])) {
+      rebuilding = true;
+      setTimeout(() => { rebuilding = false; build(); }, 900);
+    }
   }
+  let rebuilding = false;
 
   // Shaking the phone breaks a handful of random cells at once.
   const SHAKE_THRESHOLD = 13; // m/s² of motion beyond gravity
@@ -405,7 +409,7 @@
       prevG = { x: g.x, y: g.y, z: g.z };
     } else return;
     const now = performance.now();
-    if (!alive || force < SHAKE_THRESHOLD || now - lastShake < 250) return;
+    if (force < SHAKE_THRESHOLD || now - lastShake < 250) return;
     lastShake = now;
     const pool = [];
     for (let i = 0; i < n * n; i++) if (dark[i] && !broken[i]) pool.push(i);
