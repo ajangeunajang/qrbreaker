@@ -242,16 +242,39 @@
   }
 
   // Sand-like sliding: anything steeper than MAX_SLOPE trickles down to its neighbour.
+  // Tilting the phone leans the whole slope, so the pile runs toward the low side.
+  // Returns how much the surface actually changed, which drives the pouring sound.
+  let before = new Float32Array(0);
   function settle() {
-    for (let pass = 0; pass < 2; pass++)
+    const lean = tilt * MAX_SLOPE * 3; // starts flowing past ~13°
+    if (before.length !== cols) before = new Float32Array(cols);
+    for (let i = 0; i < cols; i++) before[i] = pileAt(i);
+    // When tilted, every pass runs downhill so sand that just arrived keeps rolling on
+    // in the same pass, like an avalanche; level, passes alternate to stay symmetric.
+    for (let pass = 0; pass < 4; pass++)
       for (let k = 0; k < cols - 1; k++) {
-        const i = pass ? cols - 2 - k : k;
-        const d = pileAt(i) - pileAt(i + 1);
+        const tilted = Math.abs(tilt) > .05;
+        const i = (tilted ? tilt < 0 : pass % 2) ? cols - 2 - k : k;
+        const d = pileAt(i) - pileAt(i + 1) + lean;
         if (Math.abs(d) <= MAX_SLOPE) continue;
-        const m = (Math.abs(d) - MAX_SLOPE) * .25;
+        const m = (Math.abs(d) - MAX_SLOPE) * (tilted ? .9 : .45);
         if (d > 0) moveTop(i, i + 1, m); else moveTop(i + 1, i, m);
       }
+    let changed = 0;
+    for (let i = 0; i < cols; i++) changed += Math.abs(pileAt(i) - before[i]);
+    return changed * COL / 2;
   }
+
+  // Left–right tilt of the phone, -1 (left side down) … 1 (right side down).
+  let tilt = 0, tiltTarget = 0;
+  window.addEventListener('deviceorientation', e => {
+    if (e.gamma == null) return;
+    const angle = (screen.orientation && screen.orientation.angle) || 0;
+    // Only portrait is mapped; in landscape the layout changes anyway.
+    if (angle === 90 || angle === 270 || angle === -90) { tiltTarget = 0; return; }
+    const g = (angle === 180 ? -e.gamma : e.gamma) / 40;
+    tiltTarget = Math.abs(g) < .08 ? 0 : Math.max(-1, Math.min(1, g));
+  });
 
   // A shake kicks chunks off the pile back into the air; they land again.
   function scatterPile(force) {
@@ -393,6 +416,32 @@
     crumbs(t, 26, .9, .3);
   }
 
+  // Pouring sand: a soft hiss that swells with how much is sliding, plus tiny grains.
+  let pourGain = null, pourLevel = 0, pourGrains = 0;
+  function pourSound(moved, dt) {
+    if (!audio) return;
+    if (!pourGain) {
+      const src = audio.createBufferSource();
+      src.buffer = noise; src.loop = true;
+      const f = audio.createBiquadFilter();
+      f.type = 'bandpass'; f.frequency.value = 4200; f.Q.value = .6;
+      pourGain = audio.createGain();
+      pourGain.gain.value = 0;
+      src.connect(f).connect(pourGain).connect(master);
+      src.start();
+    }
+    const flow = moved / Math.max(dt, 1e-3); // px² per second
+    pourLevel += (Math.min(1, flow / 9000) - pourLevel) * Math.min(1, dt * 8);
+    pourGain.gain.setTargetAtTime(pourLevel < .03 ? 0 : pourLevel * .14, audio.currentTime, .05);
+    pourGrains += pourLevel * 60 * dt;
+    const t = audio.currentTime + .005;
+    for (; pourGrains >= 1; pourGrains--)
+      grain(t + Math.random() * .03, {
+        type: 'highpass', freq: rand(4000, 9000), q: .7,
+        gain: rand(.02, .07), decay: rand(.004, .01),
+      });
+  }
+
   function sweepSound() {
     if (!audio) return;
     const t = audio.currentTime + .01;
@@ -503,6 +552,8 @@
     const DME = window.DeviceMotionEvent;
     // iOS only delivers motion events after permission, which must be asked from a tap.
     if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => { motionAsked = false; });
+    const DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === 'function') DOE.requestPermission().catch(() => { motionAsked = false; });
   }
 
   window.addEventListener('devicemotion', e => {
@@ -566,8 +617,12 @@
     const ink = getComputedStyle(canvas).color, grey = getComputedStyle(fx).color;
 
     // Fragments fly until they hit the pile surface (or bounce off the screen edges).
+    // Smoothed so a quick shake doesn't read as a tilt.
+    tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
+
     particles = particles.filter(p => {
       p.vy += 1600 * dt;
+      p.vx += 1100 * tilt * dt;
       p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
       if (p.x < 0) { p.x = 0; p.vx *= -.4; }
       if (p.x + p.s > VW) { p.x = VW - p.s; p.vx *= -.4; }
@@ -582,7 +637,7 @@
       const t = Math.min(fresh[i], fresh[i] * dt * .3 + dt * .03);
       fresh[i] -= t; ash[i] += t;
     }
-    settle();
+    pourSound(settle(), dt);
 
     let off = 0;
     if (sweep >= 0) {
