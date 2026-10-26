@@ -10,17 +10,17 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #f4f3ef;
-    --fg: #111;
-    --muted: #77756f;
+    --bg: #f4f1f8;
+    --fg: #8f84bd;
+    --muted: #8f84bd;
     --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;
     --sym: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #121211;
-      --fg: #eceae4;
-      --muted: #8d8b85;
+      --bg: #1e1c26;
+      --fg: #b6acdc;
+      --muted: #b6acdc;
     }
   }
   * { box-sizing: border-box; }
@@ -60,6 +60,7 @@
     color: var(--muted);
     font-size: 13px;
     line-height: 1.7;
+    text-align: center;
   }
   footer p { margin: 0; }
   footer .sym { font-family: var(--sym); }
@@ -312,7 +313,7 @@
     if (flash > 0) {
       // Tint only the drawn cells, not the empty canvas.
       ctx.globalCompositeOperation = 'source-atop';
-      ctx.fillStyle = `rgba(214, 49, 43, ${flash * .8})`;
+      ctx.fillStyle = `rgba(240, 150, 150, ${flash * .85})`;
       ctx.fillRect(0, 0, W, W);
       ctx.globalCompositeOperation = 'source-over';
       flash = Math.max(0, flash - dt * 1.5);
