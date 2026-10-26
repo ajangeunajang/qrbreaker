@@ -62,7 +62,7 @@
     width: min(100%, 420px);
     aspect-ratio: 1;
     color: var(--muted);
-    touch-action: manipulation;
+    touch-action: none;
     user-select: none;
     -webkit-user-select: none;
     cursor: crosshair;
@@ -227,30 +227,78 @@
     o.start(t); o.stop(t + decay + .02);
   }
 
-  function crumbs(t, count, spread, gain) {
+  function crumbs(t, count, spread, gain, { freq = 3500, span = 5000, q = .7, type = 'highpass', decay = .014 } = {}) {
     for (let i = 0; i < count; i++) {
       const dt = .05 + Math.pow(Math.random(), 1.6) * spread;
       grain(t + dt, {
-        type: 'highpass', freq: 3500 + Math.random() * 5000, q: .7,
+        type, freq: freq + Math.random() * span, q,
         gain: gain * (1 - dt / (spread + .1)) * (.4 + Math.random() * .6),
-        decay: .006 + Math.random() * .014,
+        decay: .006 + Math.random() * decay,
       });
     }
   }
 
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  // Each visit picks one material, so every session sounds a little different.
+  const MATERIALS = {
+    ceramic(t) {
+      grain(t, { freq: rand(2200, 4800), q: rand(1.2, 2.2), gain: .55, decay: rand(.05, .1) });
+      grain(t, { type: 'highpass', freq: 6000, q: .5, gain: .25, decay: .02 });
+      thock(t, rand(140, 220), .25, .06);
+      crumbs(t, 4 + Math.floor(Math.random() * 4), .35, .22);
+    },
+    glass(t) {
+      grain(t, { freq: rand(3500, 6500), q: rand(5, 9), gain: .7, decay: rand(.12, .2) });
+      grain(t, { type: 'highpass', freq: 7000, q: .5, gain: .3, decay: .015 });
+      crumbs(t, 5 + Math.floor(Math.random() * 5), .5, .2, { type: 'bandpass', freq: 5000, span: 4000, q: 8, decay: .06 });
+    },
+    twig(t) {
+      grain(t, { freq: rand(1200, 2400), q: rand(1.5, 3), gain: .7, decay: rand(.025, .045) });
+      grain(t + .012, { freq: rand(900, 1600), q: 2, gain: .35, decay: .03 });
+      thock(t, rand(180, 260), .35, .05);
+      crumbs(t, 2 + Math.floor(Math.random() * 3), .2, .15, { type: 'bandpass', freq: 1500, span: 1500, q: 1.5 });
+    },
+    crunch(t) {
+      const bites = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < bites; i++)
+        grain(t + i * rand(.008, .02), { freq: rand(1800, 5000), q: rand(.8, 1.6), gain: rand(.3, .5), decay: rand(.015, .035) });
+      thock(t, rand(110, 160), .2, .05);
+      crumbs(t, 6 + Math.floor(Math.random() * 4), .3, .18, { freq: 2500, span: 4000 });
+    },
+    pop(t) {
+      grain(t, { type: 'lowpass', freq: rand(1800, 3000), q: 1, gain: .7, decay: rand(.02, .035) });
+      thock(t, rand(380, 520), .35, .045);
+      crumbs(t, 1 + Math.floor(Math.random() * 2), .12, .08);
+    },
+    ice(t) {
+      grain(t, { freq: rand(2500, 4000), q: rand(3, 5), gain: .6, decay: rand(.06, .1) });
+      ping(t, rand(1800, 3200), .12, .18);
+      crumbs(t, 4 + Math.floor(Math.random() * 3), .4, .2, { type: 'bandpass', freq: 3000, span: 3000, q: 4, decay: .03 });
+    },
+  };
+  const materialName = Object.keys(MATERIALS)[Math.floor(Math.random() * Object.keys(MATERIALS).length)];
+  const material = MATERIALS[materialName];
+
+  function ping(t, freq, gain, decay) {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(.0001, t + decay);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + decay + .02);
+  }
+
   function crackSound(delay = 0) {
     if (!audio) return;
-    const t = audio.currentTime + .005 + delay;
-    grain(t, { freq: 2200 + Math.random() * 2600, q: 1.2 + Math.random(), gain: .55, decay: .05 + Math.random() * .05 });
-    grain(t, { type: 'highpass', freq: 6000, q: .5, gain: .25, decay: .02 });
-    thock(t, 140 + Math.random() * 80, .25, .06);
-    crumbs(t, 4 + Math.floor(Math.random() * 4), .35, .22);
+    material(audio.currentTime + .005 + delay);
   }
 
   function deathSound() {
     if (!audio) return;
     const t = audio.currentTime + .005;
-    grain(t, { freq: 1600, q: .8, gain: .7, decay: .12 });
+    for (let i = 0; i < 5; i++) material(t + i * rand(.02, .05));
     grain(t, { type: 'lowpass', freq: 400, q: .5, gain: .6, decay: .5, attack: .01 });
     thock(t, 90, .45, .25);
     crumbs(t, 26, .9, .3);
@@ -260,16 +308,15 @@
     try { navigator.vibrate && navigator.vibrate(p); } catch {}
   }
 
-  canvas.addEventListener('pointerdown', e => {
-    initAudio();
-    askMotion();
-    // Once it no longer scans, the next tap brings a fresh QR back.
-    if (!alive) return build();
+  // Cell coordinates (in modules) under a pointer event.
+  function toGrid(e) {
     const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left - pad) / cell;
-    const my = (e.clientY - rect.top - pad) / cell;
-    // Snap to the nearest unbroken dark cell within ~1 cell, so small cells are still easy to hit.
-    let best = -1, bd = 1;
+    return { x: (e.clientX - rect.left - pad) / cell, y: (e.clientY - rect.top - pad) / cell };
+  }
+
+  // Nearest unbroken dark cell within `radius` cells, so small cells are still easy to hit.
+  function hit(mx, my, radius) {
+    let best = -1, bd = radius * radius;
     for (let r = Math.floor(my) - 1; r <= Math.floor(my) + 1; r++)
       for (let c = Math.floor(mx) - 1; c <= Math.floor(mx) + 1; c++) {
         if (r < 0 || c < 0 || r >= n || c >= n) continue;
@@ -278,8 +325,42 @@
         const d = (c + .5 - mx) ** 2 + (r + .5 - my) ** 2;
         if (d < bd) { bd = d; best = i; }
       }
-    if (best >= 0) smash([best]);
+    return best;
+  }
+
+  let drag = null;
+
+  canvas.addEventListener('pointerdown', e => {
+    initAudio();
+    // Once it no longer scans, the next tap brings a fresh QR back.
+    if (!alive) return build();
+    canvas.setPointerCapture(e.pointerId);
+    drag = toGrid(e);
+    const i = hit(drag.x, drag.y, 1);
+    if (i >= 0) smash([i]);
   });
+
+  // Dragging breaks every cell the finger passes over; fast swipes are sampled
+  // every half cell so no cell in between gets skipped.
+  canvas.addEventListener('pointermove', e => {
+    if (!drag || !alive) return;
+    const to = toGrid(e);
+    const steps = Math.ceil(Math.hypot(to.x - drag.x, to.y - drag.y) / .5);
+    for (let k = 1; k <= steps && alive; k++) {
+      const i = hit(drag.x + (to.x - drag.x) * k / steps, drag.y + (to.y - drag.y) * k / steps, .75);
+      if (i >= 0) smash([i]);
+    }
+    drag = to;
+  });
+
+  function endDrag() {
+    drag = null;
+    // Safari only counts the end of a touch as a user gesture, so ask for motion here.
+    initAudio();
+    askMotion();
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', () => { drag = null; });
 
   function smash(cells) {
     cells.forEach((i, k) => {
@@ -293,6 +374,7 @@
       vibrate(cells.length > 1 ? 60 : 8);
     } else {
       alive = false;
+      drag = null;
       deathSound();
       shake = 14;
       flash = 1;
@@ -300,29 +382,34 @@
     }
   }
 
-  // Shaking the phone hard breaks a handful of random cells at once.
-  const SHAKE_THRESHOLD = 22; // m/s², roughly a firm wrist flick
-  let lastShake = 0, motionAsked = false;
+  // Shaking the phone breaks a handful of random cells at once.
+  const SHAKE_THRESHOLD = 13; // m/s² of motion beyond gravity
+  let lastShake = 0, motionAsked = false, prevG = null;
 
   function askMotion() {
     if (motionAsked) return;
     motionAsked = true;
     const DME = window.DeviceMotionEvent;
     // iOS only delivers motion events after permission, which must be asked from a tap.
-    if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => {});
+    if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => { motionAsked = false; });
   }
 
   window.addEventListener('devicemotion', e => {
-    if (!alive) return;
-    const a = e.accelerationIncludingGravity;
-    if (!a || a.x == null) return;
-    const force = Math.abs(Math.hypot(a.x, a.y, a.z) - 9.8);
+    // Prefer gravity-free acceleration; otherwise use the jump between readings,
+    // which catches side-to-side shakes that the total magnitude misses.
+    let force;
+    const a = e.acceleration, g = e.accelerationIncludingGravity;
+    if (a && a.x != null) force = Math.hypot(a.x, a.y, a.z);
+    else if (g && g.x != null) {
+      force = prevG ? Math.hypot(g.x - prevG.x, g.y - prevG.y, g.z - prevG.z) : 0;
+      prevG = { x: g.x, y: g.y, z: g.z };
+    } else return;
     const now = performance.now();
-    if (force < SHAKE_THRESHOLD || now - lastShake < 350) return;
+    if (!alive || force < SHAKE_THRESHOLD || now - lastShake < 250) return;
     lastShake = now;
     const pool = [];
     for (let i = 0; i < n * n; i++) if (dark[i] && !broken[i]) pool.push(i);
-    const count = Math.min(pool.length, Math.round(6 + (force - SHAKE_THRESHOLD) * .8));
+    const count = Math.min(pool.length, 30, Math.round(5 + (force - SHAKE_THRESHOLD) * 1.2));
     for (let k = 0; k < count; k++) {
       const j = k + Math.floor(Math.random() * (pool.length - k));
       [pool[k], pool[j]] = [pool[j], pool[k]];
