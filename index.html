@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #f4f1f8;
+    --bg: #ededed;
     --fg: #8f84bd;
     --muted: #8f84bd;
     --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;
@@ -18,13 +18,14 @@
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1e1c26;
+      --bg: #1a1a1a;
       --fg: #b6acdc;
       --muted: #b6acdc;
     }
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
+  html { background: var(--bg); }
   body {
     background: var(--bg);
     color: var(--fg);
