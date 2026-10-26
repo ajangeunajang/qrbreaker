@@ -29,6 +29,7 @@
     --hue: 290;
     --fg: oklch(.66 .085 var(--hue));
     --muted: var(--fg);
+    --ash: #c4c4c4;
     --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;
     --sym: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
   }
@@ -37,6 +38,7 @@
       --bg: #1a1a1a;
       --fg: oklch(.8 .07 var(--hue));
       --muted: var(--fg);
+      --ash: #444;
     }
   }
   * { box-sizing: border-box; }
@@ -58,7 +60,7 @@
     place-items: center;
     padding: max(24px, env(safe-area-inset-top)) 16px 0;
   }
-  canvas {
+  #qr {
     display: block;
     width: min(100%, 420px);
     aspect-ratio: 1;
@@ -69,7 +71,21 @@
     cursor: crosshair;
   }
 
+  /* Flying fragments and the debris pile live on a full-screen layer above the QR. */
+  #fx {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+    color: var(--ash);
+  }
+
   footer {
+    position: relative;
+    z-index: 2;
+    text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg);
     width: 100%;
     max-width: 452px;
     margin: 0 auto;
@@ -88,6 +104,7 @@
 <main>
   <canvas id="qr"></canvas>
 </main>
+<canvas id="fx"></canvas>
 
 <footer>
   <p><span class="sym">©</span> 2026. QR Breaker. All rights reserved.</p>
@@ -144,7 +161,6 @@
     for (let r = 0; r < n; r++)
       for (let c = 0; c < n; c++)
         if (GRID[r][c] === '1') dark[r * n + c] = 1;
-    particles = [];
     flash = 0;
     shake = 0;
     resize();
@@ -175,16 +191,88 @@
   }
 
   function burst(r, c) {
-    const x = pad + c * cell, y = pad + r * cell, p = cell / 3;
+    const rect = canvas.getBoundingClientRect();
+    const x = rect.left + pad + c * cell, y = rect.top + pad + r * cell, p = cell / 3;
     for (let i = 0; i < 3; i++)
       for (let j = 0; j < 3; j++) {
         const a = Math.random() * Math.PI * 2, sp = 120 + Math.random() * 260;
         particles.push({
           x: x + j * p, y: y + i * p, s: p,
           vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 220,
-          rot: 0, vr: (Math.random() - .5) * 16, life: 1,
+          rot: 0, vr: (Math.random() - .5) * 16, ash: false,
         });
       }
+  }
+
+  // Debris pile: the bottom of the screen is split into thin columns, each holding fresh
+  // (still QR-colored) debris on top of grey ash. Fresh debris slowly turns to ash.
+  const fx = document.querySelector('#fx'), fctx = fx.getContext('2d');
+  const COL = 2, MAX_SLOPE = COL * 1.3;
+  let VW = 0, VH = 0, cols = 0, sweep = -1;
+  let ash = new Float32Array(0), fresh = new Float32Array(0);
+
+  function resizeFx() {
+    VW = window.innerWidth;
+    VH = window.innerHeight;
+    fx.width = Math.round(VW * dpr);
+    fx.height = Math.round(VH * dpr);
+    const next = Math.ceil(VW / COL);
+    if (next === cols) return;
+    const a = new Float32Array(next), f = new Float32Array(next), keep = Math.min(next, cols);
+    a.set(ash.subarray(0, keep));
+    f.set(fresh.subarray(0, keep));
+    ash = a; fresh = f; cols = next;
+  }
+
+  const pileAt = i => ash[i] + fresh[i];
+
+  // A landed fragment spreads its area over the columns it covers.
+  function deposit(p) {
+    const c0 = Math.max(0, Math.floor(p.x / COL)), c1 = Math.min(cols - 1, Math.floor((p.x + p.s) / COL));
+    const add = p.s * p.s / ((c1 - c0 + 1) * COL);
+    for (let i = c0; i <= c1; i++) (p.ash ? ash : fresh)[i] += add;
+  }
+
+  // Lift `m` off the top of a column (fresh first) and drop it on `to`, or nowhere if to < 0.
+  function moveTop(from, to, m) {
+    const f = Math.min(fresh[from], m), a = Math.min(ash[from], m - f);
+    fresh[from] -= f; ash[from] -= a;
+    if (to >= 0) { fresh[to] += f; ash[to] += a; }
+    return { f, a };
+  }
+
+  // Sand-like sliding: anything steeper than MAX_SLOPE trickles down to its neighbour.
+  function settle() {
+    for (let pass = 0; pass < 2; pass++)
+      for (let k = 0; k < cols - 1; k++) {
+        const i = pass ? cols - 2 - k : k;
+        const d = pileAt(i) - pileAt(i + 1);
+        if (Math.abs(d) <= MAX_SLOPE) continue;
+        const m = (Math.abs(d) - MAX_SLOPE) * .25;
+        if (d > 0) moveTop(i, i + 1, m); else moveTop(i + 1, i, m);
+      }
+  }
+
+  // A shake kicks chunks off the pile back into the air; they land again.
+  function scatterPile(force) {
+    const kicks = Math.min(90, Math.round(force * 3));
+    for (let k = 0; k < kicks; k++) {
+      const i = Math.floor(Math.random() * cols), h = pileAt(i);
+      if (h < 2) continue;
+      const { f, a } = moveTop(i, -1, Math.min(h * .4, rand(3, 8)));
+      particles.push({
+        x: i * COL, y: VH - h, s: Math.sqrt((f + a) * COL),
+        vx: rand(-260, 260), vy: -rand(250, 450) * Math.min(2, force / SHAKE_THRESHOLD),
+        rot: 0, vr: rand(-10, 10), ash: a > f,
+      });
+    }
+  }
+
+  // When the QR refills, the old pile slides off to the side.
+  function sweepPile() {
+    if (sweep >= 0 || !ash.some((h, i) => h + fresh[i] > .5)) return;
+    sweep = 0;
+    sweepSound();
   }
 
   // ASMR: everything is synthesized from one noise buffer — a crisp crack, a soft thock,
@@ -305,6 +393,24 @@
     crumbs(t, 26, .9, .3);
   }
 
+  function sweepSound() {
+    if (!audio) return;
+    const t = audio.currentTime + .01;
+    const src = audio.createBufferSource();
+    src.buffer = noise;
+    const f = audio.createBiquadFilter();
+    f.type = 'bandpass'; f.Q.value = .9;
+    f.frequency.setValueAtTime(300, t);
+    f.frequency.exponentialRampToValueAtTime(2500, t + .6);
+    const g = audio.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(.35, t + .2);
+    g.gain.exponentialRampToValueAtTime(.0001, t + .75);
+    src.connect(f).connect(g).connect(master);
+    src.start(t, Math.random(), .8);
+    crumbs(t, 20, .7, .12);
+  }
+
   function vibrate(p) {
     try { navigator.vibrate && navigator.vibrate(p); } catch {}
   }
@@ -382,7 +488,7 @@
     // When every cell is gone, a fresh QR comes back so it never runs out.
     if (!rebuilding && !dark.some((d, i) => d && !broken[i])) {
       rebuilding = true;
-      setTimeout(() => { rebuilding = false; build(); }, 900);
+      setTimeout(() => { rebuilding = false; sweepPile(); build(); }, 900);
     }
   }
   let rebuilding = false;
@@ -420,6 +526,7 @@
       [pool[k], pool[j]] = [pool[j], pool[k]];
     }
     smash(pool.slice(0, count));
+    scatterPile(force);
   });
 
   let last = performance.now();
@@ -441,18 +548,6 @@
           ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
         }
 
-    particles = particles.filter(p => (p.life -= dt * .9) > 0);
-    for (const p of particles) {
-      p.vy += 1600 * dt;
-      p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
-      ctx.globalAlpha = Math.min(1, p.life * 1.5);
-      ctx.save();
-      ctx.translate(p.x + p.s / 2, p.y + p.s / 2);
-      ctx.rotate(p.rot);
-      ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s);
-      ctx.restore();
-    }
-    ctx.globalAlpha = 1;
     ctx.restore();
 
     if (flash > 0) {
@@ -463,12 +558,62 @@
       ctx.globalCompositeOperation = 'source-over';
       flash = Math.max(0, flash - dt * 1.5);
     }
+    drawFx(dt);
     requestAnimationFrame(frame);
   }
 
-  window.addEventListener('resize', resize);
+  function drawFx(dt) {
+    const ink = getComputedStyle(canvas).color, grey = getComputedStyle(fx).color;
+
+    // Fragments fly until they hit the pile surface (or bounce off the screen edges).
+    particles = particles.filter(p => {
+      p.vy += 1600 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+      if (p.x < 0) { p.x = 0; p.vx *= -.4; }
+      if (p.x + p.s > VW) { p.x = VW - p.s; p.vx *= -.4; }
+      if (p.vy < 0) return true;
+      const i = Math.min(cols - 1, Math.max(0, Math.floor((p.x + p.s / 2) / COL)));
+      if (p.y + p.s < VH - pileAt(i)) return true;
+      deposit(p);
+      return false;
+    });
+
+    for (let i = 0; i < cols; i++) {
+      const t = Math.min(fresh[i], fresh[i] * dt * .3 + dt * .03);
+      fresh[i] -= t; ash[i] += t;
+    }
+    settle();
+
+    let off = 0;
+    if (sweep >= 0) {
+      sweep += dt / .7;
+      off = sweep * sweep * VW * 1.1;
+      if (sweep >= 1) { ash.fill(0); fresh.fill(0); sweep = -1; off = 0; }
+    }
+
+    fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    fctx.clearRect(0, 0, VW, VH);
+    fctx.fillStyle = grey;
+    for (let i = 0; i < cols; i++)
+      if (ash[i] > .2) fctx.fillRect(i * COL + off, VH - ash[i], COL + .5, ash[i]);
+    fctx.fillStyle = ink;
+    for (let i = 0; i < cols; i++)
+      if (fresh[i] > .2) fctx.fillRect(i * COL + off, VH - ash[i] - fresh[i], COL + .5, fresh[i]);
+
+    for (const p of particles) {
+      fctx.fillStyle = p.ash ? grey : ink;
+      fctx.save();
+      fctx.translate(p.x + p.s / 2, p.y + p.s / 2);
+      fctx.rotate(p.rot);
+      fctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s);
+      fctx.restore();
+    }
+  }
+
+  window.addEventListener('resize', () => { resize(); resizeFx(); });
 
   build();
+  resizeFx();
   requestAnimationFrame(frame);
 </script>
 </body>
