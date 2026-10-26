@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no, email=no, address=no">
+<title>QR Breaker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f3ef;
+    --fg: #111;
+    --muted: #77756f;
+    --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --sym: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121211;
+      --fg: #eceae4;
+      --muted: #8d8b85;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font);
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 100dvh;
+  }
+  body { display: flex; flex-direction: column; }
+  main {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    padding: max(24px, env(safe-area-inset-top)) 16px 0;
+  }
+  canvas {
+    display: block;
+    width: min(100%, 420px);
+    aspect-ratio: 1;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: crosshair;
+  }
+
+  footer {
+    width: 100%;
+    max-width: 452px;
+    margin: 0 auto;
+    padding: 24px 16px max(24px, env(safe-area-inset-bottom));
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  footer p { margin: 0; }
+  footer .sym { font-family: var(--sym); }
+  footer a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; padding-bottom: 1px; }
+</style>
+</head>
+<body>
+<main>
+  <canvas id="qr"></canvas>
+</main>
+
+<footer>
+  <p><span class="sym">©</span> 2026. QR Breaker. All rights reserved.</p>
+  <p>Inquiries <span class="sym">☞</span> ajangeunajang@gmail.com</p>
+  <p>Design and Developed by <a href="https://www.ajangeunajang.com/" target="_blank" rel="noopener">Euna Jang</a></p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>
+  const canvas = document.querySelector('#qr'), ctx = canvas.getContext('2d');
+  const scan = document.createElement('canvas');
+  const sctx = scan.getContext('2d', { willReadFrequently: true });
+  // Module grid of qr-code.svg (29×29, EC level M).
+  const GRID = [
+    '11111110010010100001001111111',
+    '10000010110111000001101000001',
+    '10111010001000010010001011101',
+    '10111010001101001011001011101',
+    '10111010110101001011001011101',
+    '10000010011010111001001000001',
+    '11111110101010101010101111111',
+    '00000000011110010110100000000',
+    '10101010000010001100000010010',
+    '10011101000001011100111001001',
+    '10000010101000111000111100111',
+    '10110001000011101110100000010',
+    '11110110100010110101101001011',
+    '01111000101100110000011001001',
+    '00101110110001000000010001011',
+    '10010100100110010100000101010',
+    '11011011000110001110011101011',
+    '00101001101011011000101001101',
+    '10001011110110111100011110011',
+    '01111100101111101100110001010',
+    '10111111000100111101111110000',
+    '00000000101100110101100010111',
+    '11111110001111000011101011011',
+    '10000010011110001110100011001',
+    '10111010111010011100111110010',
+    '10111010001101000111000110100',
+    '10111010111100001011100111001',
+    '10000010010110110101101000010',
+    '11111110101110100101110100011',
+  ];
+
+  let n, dark, broken, alive;
+  let W = 0, cell = 0, pad = 0, dpr = 1;
+  let particles = [], shake = 0, flash = 0;
+
+  function build() {
+    n = GRID.length;
+    dark = new Uint8Array(n * n);
+    broken = new Uint8Array(n * n);
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (GRID[r][c] === '1') dark[r * n + c] = 1;
+    particles = [];
+    flash = 0;
+    shake = 0;
+    resize();
+    alive = !!decode();
+  }
+
+  // Redraw the surviving cells cleanly (no particles) and ask jsQR whether it still reads.
+  function decode() {
+    const q = 4, s = 4, size = (n + q * 2) * s;
+    scan.width = scan.height = size;
+    sctx.fillStyle = '#fff';
+    sctx.fillRect(0, 0, size, size);
+    sctx.fillStyle = '#000';
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (dark[r * n + c] && !broken[r * n + c]) sctx.fillRect((c + q) * s, (r + q) * s, s, s);
+    const img = sctx.getImageData(0, 0, size, size);
+    return jsQR(img.data, size, size, { inversionAttempts: 'dontInvert' });
+  }
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = canvas.getBoundingClientRect().width;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(W * dpr);
+    cell = W / (n + 4);
+    pad = cell * 2;
+  }
+
+  function burst(r, c) {
+    const x = pad + c * cell, y = pad + r * cell, p = cell / 3;
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) {
+        const a = Math.random() * Math.PI * 2, sp = 120 + Math.random() * 260;
+        particles.push({
+          x: x + j * p, y: y + i * p, s: p,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 220,
+          rot: 0, vr: (Math.random() - .5) * 16, life: 1,
+        });
+      }
+  }
+
+  // ASMR: everything is synthesized from one noise buffer — a crisp crack, a soft thock,
+  // then tiny crumbs ticking down as the fragments land.
+  let audio = null, noise = null, master = null;
+
+  function initAudio() {
+    if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audio = new AC();
+    noise = audio.createBuffer(1, audio.sampleRate * 2, audio.sampleRate);
+    const d = noise.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const comp = audio.createDynamicsCompressor();
+    master = audio.createGain();
+    master.gain.value = .9;
+    master.connect(comp).connect(audio.destination);
+  }
+
+  function grain(t, { type = 'bandpass', freq, q = 1, gain, decay, attack = .001 }) {
+    const src = audio.createBufferSource();
+    src.buffer = noise;
+    const f = audio.createBiquadFilter();
+    f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = audio.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain, t + attack);
+    g.gain.exponentialRampToValueAtTime(.0001, t + attack + decay);
+    src.connect(f).connect(g).connect(master);
+    src.start(t, Math.random() * 1.5, attack + decay + .02);
+  }
+
+  function thock(t, freq, gain, decay) {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.setValueAtTime(freq, t);
+    o.frequency.exponentialRampToValueAtTime(freq * .5, t + decay);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(.0001, t + decay);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + decay + .02);
+  }
+
+  function crumbs(t, count, spread, gain) {
+    for (let i = 0; i < count; i++) {
+      const dt = .05 + Math.pow(Math.random(), 1.6) * spread;
+      grain(t + dt, {
+        type: 'highpass', freq: 3500 + Math.random() * 5000, q: .7,
+        gain: gain * (1 - dt / (spread + .1)) * (.4 + Math.random() * .6),
+        decay: .006 + Math.random() * .014,
+      });
+    }
+  }
+
+  function crackSound() {
+    if (!audio) return;
+    const t = audio.currentTime + .005;
+    grain(t, { freq: 2200 + Math.random() * 2600, q: 1.2 + Math.random(), gain: .55, decay: .05 + Math.random() * .05 });
+    grain(t, { type: 'highpass', freq: 6000, q: .5, gain: .25, decay: .02 });
+    thock(t, 140 + Math.random() * 80, .25, .06);
+    crumbs(t, 4 + Math.floor(Math.random() * 4), .35, .22);
+  }
+
+  function deathSound() {
+    if (!audio) return;
+    const t = audio.currentTime + .005;
+    grain(t, { freq: 1600, q: .8, gain: .7, decay: .12 });
+    grain(t, { type: 'lowpass', freq: 400, q: .5, gain: .6, decay: .5, attack: .01 });
+    thock(t, 90, .45, .25);
+    crumbs(t, 26, .9, .3);
+  }
+
+  function vibrate(p) {
+    try { navigator.vibrate && navigator.vibrate(p); } catch {}
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    initAudio();
+    // Once it no longer scans, the next tap brings a fresh QR back.
+    if (!alive) return build();
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left - pad) / cell;
+    const my = (e.clientY - rect.top - pad) / cell;
+    // Snap to the nearest unbroken dark cell within ~1 cell, so small cells are still easy to hit.
+    let best = -1, bd = 1;
+    for (let r = Math.floor(my) - 1; r <= Math.floor(my) + 1; r++)
+      for (let c = Math.floor(mx) - 1; c <= Math.floor(mx) + 1; c++) {
+        if (r < 0 || c < 0 || r >= n || c >= n) continue;
+        const i = r * n + c;
+        if (!dark[i] || broken[i]) continue;
+        const d = (c + .5 - mx) ** 2 + (r + .5 - my) ** 2;
+        if (d < bd) { bd = d; best = i; }
+      }
+    if (best < 0) return;
+    broken[best] = 1;
+    burst(Math.floor(best / n), best % n);
+    if (decode()) {
+      crackSound();
+      shake = Math.max(shake, 3);
+      vibrate(8);
+    } else {
+      alive = false;
+      deathSound();
+      shake = 14;
+      flash = 1;
+      vibrate([40, 40, 120]);
+    }
+  });
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, .05);
+    last = now;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, W);
+    ctx.save();
+    if (shake > .3) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+    shake *= .86;
+
+    ctx.fillStyle = getComputedStyle(document.body).color;
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (dark[r * n + c] && !broken[r * n + c]) {
+          const x0 = Math.round(pad + c * cell), y0 = Math.round(pad + r * cell);
+          const x1 = Math.round(pad + (c + 1) * cell), y1 = Math.round(pad + (r + 1) * cell);
+          ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+        }
+
+    particles = particles.filter(p => (p.life -= dt * .9) > 0);
+    for (const p of particles) {
+      p.vy += 1600 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+      ctx.globalAlpha = Math.min(1, p.life * 1.5);
+      ctx.save();
+      ctx.translate(p.x + p.s / 2, p.y + p.s / 2);
+      ctx.rotate(p.rot);
+      ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    if (flash > 0) {
+      // Tint only the drawn cells, not the empty canvas.
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = `rgba(214, 49, 43, ${flash * .8})`;
+      ctx.fillRect(0, 0, W, W);
+      ctx.globalCompositeOperation = 'source-over';
+      flash = Math.max(0, flash - dt * 1.5);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize);
+
+  build();
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>
