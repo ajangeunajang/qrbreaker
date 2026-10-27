@@ -347,12 +347,6 @@
 
   // Each visit picks one material, so every session sounds a little different.
   const MATERIALS = {
-    ceramic(t) {
-      grain(t, { freq: rand(2200, 4800), q: rand(1.2, 2.2), gain: .55, decay: rand(.05, .1) });
-      grain(t, { type: 'highpass', freq: 6000, q: .5, gain: .25, decay: .02 });
-      thock(t, rand(140, 220), .25, .06);
-      crumbs(t, 4 + Math.floor(Math.random() * 4), .35, .22);
-    },
     glass(t) {
       grain(t, { freq: rand(3500, 6500), q: rand(5, 9), gain: .7, decay: rand(.12, .2) });
       grain(t, { type: 'highpass', freq: 7000, q: .5, gain: .3, decay: .015 });
