@@ -70,12 +70,11 @@
     -webkit-user-select: none;
   }
 
-  /* On desktop the cursor is a 🤏 (Noto Emoji, Apache 2.0); the hotspot sits between the fingertips. */
+  /* On desktop the cursor is the 🤏 character itself, drawn by the visitor's own emoji font;
+     the hotspot sits between the fingertips. */
   @media (hover: hover) and (pointer: fine) {
     body, #qr {
-      cursor: url(cursor.png) 4 12, auto;
-      cursor: -webkit-image-set(url(cursor.png) 1x, url(cursor@2x.png) 2x) 4 12, auto;
-      cursor: image-set(url(cursor.png) 1x, url(cursor@2x.png) 2x) 4 12, auto;
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Ctext x='16' y='27' font-size='26' text-anchor='middle'%3E%F0%9F%A4%8F%3C/text%3E%3C/svg%3E") 4 12, auto;
     }
   }
 
