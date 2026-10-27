@@ -82,6 +82,29 @@
     color: var(--ash);
   }
 
+  #sounds {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 14px;
+    padding: 20px 16px 0;
+    text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg);
+  }
+  #sounds button {
+    font: inherit;
+    font-size: 13px;
+    color: var(--fg);
+    background: none;
+    border: 0;
+    border-bottom: 1px dotted transparent;
+    padding: 2px 0 1px;
+    opacity: .5;
+    cursor: pointer;
+  }
+  #sounds button[aria-pressed="true"] { opacity: 1; border-bottom-color: currentColor; }
+
   footer {
     position: relative;
     z-index: 2;
@@ -104,6 +127,7 @@
 <main>
   <canvas id="qr"></canvas>
 </main>
+<nav id="sounds" aria-label="Sound"></nav>
 <canvas id="fx"></canvas>
 
 <footer>
@@ -345,8 +369,14 @@
 
   const rand = (a, b) => a + Math.random() * (b - a);
 
-  // Each visit picks one material, so every session sounds a little different.
+  // Each visit starts on a random material; the buttons under the QR switch it.
   const MATERIALS = {
+    ceramic(t) {
+      grain(t, { freq: rand(2200, 4800), q: rand(1.2, 2.2), gain: .55, decay: rand(.05, .1) });
+      grain(t, { type: 'highpass', freq: 6000, q: .5, gain: .25, decay: .02 });
+      thock(t, rand(140, 220), .25, .06);
+      crumbs(t, 4 + Math.floor(Math.random() * 4), .35, .22);
+    },
     glass(t) {
       grain(t, { freq: rand(3500, 6500), q: rand(5, 9), gain: .7, decay: rand(.12, .2) });
       grain(t, { type: 'highpass', freq: 7000, q: .5, gain: .3, decay: .015 });
@@ -376,8 +406,24 @@
       crumbs(t, 4 + Math.floor(Math.random() * 3), .4, .2, { type: 'bandpass', freq: 3000, span: 3000, q: 4, decay: .03 });
     },
   };
-  const materialName = Object.keys(MATERIALS)[Math.floor(Math.random() * Object.keys(MATERIALS).length)];
-  const material = MATERIALS[materialName];
+  let materialName = Object.keys(MATERIALS)[Math.floor(Math.random() * Object.keys(MATERIALS).length)];
+  let material = MATERIALS[materialName];
+
+  const soundButtons = Object.keys(MATERIALS).map(name => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = name;
+    b.setAttribute('aria-pressed', name === materialName);
+    b.addEventListener('click', () => {
+      materialName = name;
+      material = MATERIALS[name];
+      soundButtons.forEach(o => o.setAttribute('aria-pressed', o === b));
+      initAudio();
+      crackSound();
+    });
+    return b;
+  });
+  document.querySelector('#sounds').append(...soundButtons);
 
   function ping(t, freq, gain, decay) {
     const o = audio.createOscillator(), g = audio.createGain();
