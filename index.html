@@ -385,9 +385,29 @@
     o.start(t); o.stop(t + decay + .02);
   }
 
+  // Phones only let audio start when a touch ends, but the first cell breaks when it begins.
+  // Cracks made before then wait here and play the moment the audio is unlocked.
+  let queuedCracks = 0;
+
   function crackSound(delay = 0) {
-    if (!audio) return;
+    if (!audio || audio.state !== 'running') { queuedCracks = Math.min(queuedCracks + 1, 4); return; }
     material(audio.currentTime + .005 + delay);
+  }
+
+  function unlockAudio() {
+    initAudio();
+    if (!audio) return;
+    // iOS stays locked until a sound actually starts inside the gesture, so play a silent one.
+    const s = audio.createBufferSource();
+    s.buffer = audio.createBuffer(1, 1, audio.sampleRate);
+    s.connect(audio.destination);
+    s.start();
+    const flush = () => {
+      if (audio.state !== 'running') return;
+      for (let k = 0; k < queuedCracks; k++) crackSound(k * .025);
+      queuedCracks = 0;
+    };
+    audio.state === 'running' ? flush() : audio.resume().then(flush, () => {});
   }
 
   function deathSound() {
@@ -475,10 +495,11 @@
   function endDrag() {
     drag = null;
     // Safari only counts the end of a touch as a user gesture, so ask for motion here.
-    initAudio();
+    unlockAudio();
     askMotion();
   }
   canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('touchend', unlockAudio);
   canvas.addEventListener('pointercancel', () => { drag = null; });
 
   function smash(cells) {
